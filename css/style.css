@@ -1,0 +1,281 @@
+/* ============ 全域 ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --wood-dark: #6b3f1d;
+  --wood-mid:  #8a5527;
+  --wood-lite: #b0763c;
+  --pos-color: #e8452e;
+  --neg-color: #4a5fd6;
+}
+
+html, body { height: 100%; }
+
+body {
+  font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  display: flex;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(255,255,255,0.25), transparent 55%),
+    linear-gradient(180deg, #9ad4ea 0%, #cfe9c0 45%, #a9cf8b 100%);
+  min-height: 100vh;
+  padding: 14px 10px 30px;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.stage {
+  width: min(820px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ============ HUD ============ */
+.hud {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.hud-box {
+  flex: 1 1 100px;
+  max-width: 160px;
+  background: linear-gradient(180deg, #fffdf5 0%, #f2e8cf 100%);
+  border: 2px solid #c9b384;
+  border-radius: 14px;
+  padding: 6px 10px;
+  text-align: center;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.9),
+    0 3px 6px rgba(60,40,10,0.25);
+}
+
+.hud-label {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #8a713d;
+  font-weight: 700;
+}
+
+.hud-value {
+  display: block;
+  font-size: 26px;
+  font-weight: 800;
+  color: #4a3413;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.7);
+}
+
+.hud-target .hud-value { color: #b8860b; }
+.hud-sum .hud-value.pos,  .hud-need .hud-value.pos  { color: var(--pos-color); }
+.hud-sum .hud-value.neg,  .hud-need .hud-value.neg  { color: var(--neg-color); }
+.hud-sum .hud-value.zero, .hud-need .hud-value.zero { color: #3c7a1e; }
+
+.hud-value.bump { animation: bump .35s ease; }
+@keyframes bump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+
+/* ============ 算式列 ============ */
+.equation-bar {
+  width: 100%;
+  background: linear-gradient(180deg, #2f3d2a, #1f2a1c);
+  color: #d6f5b8;
+  border-radius: 12px;
+  border: 2px solid #4a5c40;
+  padding: 8px 14px;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 1px;
+  box-shadow:
+    inset 0 2px 8px rgba(0,0,0,0.6),
+    0 2px 4px rgba(40,60,20,0.35);
+  min-height: 42px;
+  font-variant-numeric: tabular-nums;
+}
+.equation-bar .pos { color: #ff9d8a; }
+.equation-bar .neg { color: #9fb6ff; }
+
+/* ============ 木質外框 + 棋盤 ============ */
+.board-frame {
+  position: relative;
+  width: 100%;
+  border-radius: 22px;
+  padding: 14px;
+  background:
+    repeating-linear-gradient(95deg,
+      var(--wood-mid) 0px, var(--wood-lite) 18px,
+      var(--wood-mid) 36px, var(--wood-dark) 55px,
+      var(--wood-mid) 74px),
+    var(--wood-mid);
+  box-shadow:
+    inset 0 0 0 3px rgba(60,30,5,0.55),
+    inset 0 0 14px rgba(0,0,0,0.45),
+    0 10px 24px rgba(40,25,5,0.45);
+}
+
+#board {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 3px rgba(30,60,10,0.5),
+    inset 0 0 40px rgba(20,50,5,0.35);
+  background: #79b843;
+}
+
+/* ============ 覆蓋層 ============ */
+.overlay {
+  position: absolute;
+  inset: 14px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 40, 10, 0.55);
+  backdrop-filter: blur(3px);
+  z-index: 5;
+  transition: opacity .25s ease;
+}
+.overlay.hidden { opacity: 0; pointer-events: none; }
+
+.overlay-card {
+  background: linear-gradient(180deg, #fffef8, #f4ecd2);
+  border: 3px solid #c9b384;
+  border-radius: 20px;
+  padding: 26px 34px;
+  max-width: 88%;
+  text-align: center;
+  box-shadow:
+    inset 0 2px 0 rgba(255,255,255,0.9),
+    0 12px 30px rgba(0,0,0,0.45);
+  animation: cardPop .35s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes cardPop {
+  from { transform: scale(.7); opacity: 0; }
+  to   { transform: scale(1);  opacity: 1; }
+}
+
+.overlay-card h1 {
+  font-size: 30px;
+  color: #4a3413;
+  margin-bottom: 12px;
+  text-shadow: 0 1px 0 #fff;
+}
+.overlay-card p { font-size: 16px; color: #5c4a24; line-height: 1.7; }
+.overlay-card p.hint { font-size: 14px; color: #8a713d; }
+.overlay-card .pos { color: var(--pos-color); }
+.overlay-card .neg { color: var(--neg-color); }
+.overlay-card .big-num { font-size: 34px; font-weight: 800; }
+
+.btn-primary {
+  margin-top: 16px;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff;
+  padding: 10px 36px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #8ecf52, #4e9427);
+  box-shadow:
+    inset 0 2px 0 rgba(255,255,255,0.45),
+    inset 0 -3px 0 rgba(0,0,0,0.25),
+    0 5px 10px rgba(40,80,10,0.4);
+  transition: transform .1s ease, filter .15s ease;
+}
+.btn-primary:hover  { filter: brightness(1.08); }
+.btn-primary:active { transform: translateY(2px); box-shadow: inset 0 2px 4px rgba(0,0,0,0.3); }
+
+/* ============ 數軸 ============ */
+.numberline-frame {
+  width: 100%;
+  border-radius: 16px;
+  padding: 8px 12px;
+  background: linear-gradient(180deg, #fffdf5, #ecdfc0);
+  border: 2px solid #c9b384;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.9),
+    0 4px 8px rgba(60,40,10,0.25);
+}
+#numberline { display: block; width: 100%; height: auto; }
+
+#nlMarker { transition: transform .28s cubic-bezier(.34,1.3,.64,1); }
+
+/* ============ 觸控方向鍵 ============ */
+.dpad {
+  display: none;
+  grid-template-areas:
+    ".    up    ."
+    "left down  right";
+  gap: 6px;
+  margin-top: 4px;
+}
+@media (pointer: coarse) {
+  .dpad { display: grid; }
+}
+.dpad-up    { grid-area: up; }
+.dpad-down  { grid-area: down; }
+.dpad-left  { grid-area: left; }
+.dpad-right { grid-area: right; }
+
+.dpad-btn {
+  width: 64px;
+  height: 56px;
+  font-size: 20px;
+  border: none;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(180deg, #7d8f6b, #4d5c40);
+  box-shadow:
+    inset 0 2px 0 rgba(255,255,255,0.3),
+    inset 0 -3px 0 rgba(0,0,0,0.3),
+    0 4px 8px rgba(30,40,15,0.4);
+  cursor: pointer;
+}
+.dpad-btn:active { transform: translateY(2px); }
+
+/* ============ 頁尾 ============ */
+.foot-note {
+  font-size: 13px;
+  color: #4c6134;
+  text-align: center;
+  background: rgba(255,255,255,0.5);
+  border-radius: 999px;
+  padding: 5px 18px;
+}
+
+/* ============ SVG 內動畫 ============ */
+.tongue { animation: flick 1.1s ease-in-out infinite; transform-origin: center; }
+@keyframes flick {
+  0%, 62%, 100% { opacity: 0; }
+  66%, 90%      { opacity: 1; }
+}
+
+.token-bob { animation: bob 1.6s ease-in-out infinite; }
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+
+.fx-pop {
+  animation: fxPop 0.9s ease-out forwards;
+  font-weight: 800;
+  pointer-events: none;
+}
+@keyframes fxPop {
+  0%   { opacity: 0; transform: translateY(6px)  scale(.6); }
+  15%  { opacity: 1; transform: translateY(0)    scale(1.15); }
+  70%  { opacity: 1; transform: translateY(-18px) scale(1); }
+  100% { opacity: 0; transform: translateY(-30px) scale(.9); }
+}

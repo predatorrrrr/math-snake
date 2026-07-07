@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>有向數貪食蛇 Math Snake — 學習正負數</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="stage">
+
+  <header class="hud">
+    <div class="hud-box hud-level">
+      <span class="hud-label">關卡</span>
+      <span class="hud-value" id="hudLevel">1</span>
+    </div>
+    <div class="hud-box hud-score">
+      <span class="hud-label">分數</span>
+      <span class="hud-value" id="hudScore">0</span>
+    </div>
+    <div class="hud-box hud-target">
+      <span class="hud-label">目標總和</span>
+      <span class="hud-value" id="hudTarget">+7</span>
+    </div>
+    <div class="hud-box hud-sum">
+      <span class="hud-label">目前總和</span>
+      <span class="hud-value" id="hudSum">0</span>
+    </div>
+    <div class="hud-box hud-need">
+      <span class="hud-label">還差</span>
+      <span class="hud-value" id="hudNeed">+7</span>
+    </div>
+  </header>
+
+  <div class="equation-bar">
+    <span id="equation">吃下正負數果實，讓總和剛好等於目標！</span>
+  </div>
+
+  <div class="board-frame">
+    <svg id="board" viewBox="0 0 756 540" preserveAspectRatio="xMidYMid meet" aria-label="遊戲棋盤">
+      <defs>
+        <!-- 草地紋理 -->
+        <pattern id="grassA" width="36" height="36" patternUnits="userSpaceOnUse">
+          <rect width="36" height="36" fill="#79b843"/>
+          <path d="M6 30 q2 -9 1 -14 q3 5 3 14 Z" fill="#8cc957" opacity="0.75"/>
+          <path d="M22 33 q3 -8 1 -15 q4 6 4 15 Z" fill="#6aa93a" opacity="0.8"/>
+          <path d="M30 14 q2 -6 1 -10 q3 4 3 10 Z" fill="#8cc957" opacity="0.55"/>
+          <path d="M12 16 q2 -6 0 -10 q4 4 4 10 Z" fill="#6fb03e" opacity="0.6"/>
+        </pattern>
+        <pattern id="grassB" width="36" height="36" patternUnits="userSpaceOnUse">
+          <rect width="36" height="36" fill="#83c14d"/>
+          <path d="M9 32 q2 -8 0 -13 q4 5 4 13 Z" fill="#95d162" opacity="0.7"/>
+          <path d="M25 30 q3 -9 1 -14 q4 6 4 14 Z" fill="#74b23f" opacity="0.8"/>
+          <path d="M18 15 q2 -6 1 -9 q3 3 3 9 Z" fill="#95d162" opacity="0.5"/>
+        </pattern>
+
+        <!-- 蛇身 -->
+        <radialGradient id="bodyGrad" cx="35%" cy="30%" r="80%">
+          <stop offset="0%"  stop-color="#b7e07a"/>
+          <stop offset="45%" stop-color="#6faf3c"/>
+          <stop offset="100%" stop-color="#38701f"/>
+        </radialGradient>
+        <radialGradient id="headGrad" cx="35%" cy="30%" r="85%">
+          <stop offset="0%"  stop-color="#a8d76c"/>
+          <stop offset="50%" stop-color="#5f9e33"/>
+          <stop offset="100%" stop-color="#2e611a"/>
+        </radialGradient>
+
+        <!-- 蘋果（正數） -->
+        <radialGradient id="appleGrad" cx="32%" cy="28%" r="80%">
+          <stop offset="0%"  stop-color="#ff9f80"/>
+          <stop offset="45%" stop-color="#e8452e"/>
+          <stop offset="100%" stop-color="#96150c"/>
+        </radialGradient>
+        <!-- 藍莓（負數） -->
+        <radialGradient id="berryGrad" cx="32%" cy="28%" r="80%">
+          <stop offset="0%"  stop-color="#9fb6ff"/>
+          <stop offset="45%" stop-color="#4a5fd6"/>
+          <stop offset="100%" stop-color="#1d2a80"/>
+        </radialGradient>
+
+        <filter id="softShadow" x="-40%" y="-40%" width="180%" height="180%">
+          <feDropShadow dx="0" dy="3" stdDeviation="2.4" flood-color="#1c3a0d" flood-opacity="0.45"/>
+        </filter>
+        <filter id="tinyShadow" x="-40%" y="-40%" width="180%" height="180%">
+          <feDropShadow dx="0" dy="2" stdDeviation="1.4" flood-color="#20330f" flood-opacity="0.4"/>
+        </filter>
+      </defs>
+
+      <g id="groundLayer"></g>
+      <g id="tokenLayer"></g>
+      <g id="snakeLayer"></g>
+      <g id="fxLayer"></g>
+    </svg>
+
+    <!-- 覆蓋層：開始 / 過關 / 結束 -->
+    <div class="overlay" id="overlay">
+      <div class="overlay-card" id="overlayCard">
+        <h1 id="overlayTitle">有向數貪食蛇</h1>
+        <div id="overlayBody">
+          <p>操控小蛇吃下 <b class="pos">正數蘋果</b> 與 <b class="neg">負數藍莓</b>，</p>
+          <p>讓「目前總和」剛好等於「目標總和」就能過關！</p>
+          <p class="hint">⌨️ 方向鍵 / WASD 移動 ・ 空白鍵暫停</p>
+          <p class="hint">🍎 吃 +3 表示 加 3　🫐 吃 −5 表示 減 5</p>
+        </div>
+        <button class="btn-primary" id="overlayBtn">開始遊戲</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 數軸 -->
+  <div class="numberline-frame">
+    <svg id="numberline" viewBox="0 0 756 84" preserveAspectRatio="xMidYMid meet" aria-label="數軸"></svg>
+  </div>
+
+  <!-- 觸控方向鍵 -->
+  <div class="dpad" aria-label="方向控制">
+    <button class="dpad-btn dpad-up"    data-dir="up"    aria-label="上">▲</button>
+    <button class="dpad-btn dpad-left"  data-dir="left"  aria-label="左">◀</button>
+    <button class="dpad-btn dpad-down"  data-dir="down"  aria-label="下">▼</button>
+    <button class="dpad-btn dpad-right" data-dir="right" aria-label="右">▶</button>
+  </div>
+
+  <footer class="foot-note">數學小教室：吃到 −5 就等於「加上 (−5)」，總和會往數軸左邊移動 5 格。</footer>
+</div>
+
+<script src="js/game.js"></script>
+</body>
+</html>
