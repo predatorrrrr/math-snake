@@ -320,14 +320,8 @@
       }
     }
 
-    // 目標紅旗
-    const tx = nlX(clampNL(target));
-    const flag = el("g", {}, numberline);
-    el("line", { x1: tx, y1: NL.y - 6, x2: tx, y2: NL.y - 34, stroke: "#7a4a1d", "stroke-width": 2.6, "stroke-linecap": "round" }, flag);
-    el("path", { d: `M ${tx} ${NL.y - 34} l 20 6 l -20 6 Z`, fill: "#d6362a", stroke: "#96150c", "stroke-width": 1 }, flag);
-    el("text", {
-      x: tx, y: NL.y - 38, "text-anchor": "middle", "font-size": 12, "font-weight": 800, fill: "#96150c",
-    }, flag).textContent = `目標 ${fmt(target)}`;
+    // 目標紅旗（遊戲開始前 target 為 0，不顯示）
+    if (target !== 0) drawTargetFlag();
 
     // 目前總和標記（小蛇頭），用 transform 移動以套用 CSS 過渡動畫
     const marker = el("g", { id: "nlMarker" }, numberline);
@@ -338,6 +332,16 @@
     el("circle", { cx: 4.2, cy: 3, r: 1.2, fill: "#1c2a0d" }, marker);
     el("path", { d: "M 0 14 l -5 6 h 10 Z", fill: "#5c4a24" }, marker);
     updateNlMarker();
+  }
+
+  function drawTargetFlag() {
+    const tx = nlX(clampNL(target));
+    const flag = el("g", {}, numberline);
+    el("line", { x1: tx, y1: NL.y - 6, x2: tx, y2: NL.y - 34, stroke: "#7a4a1d", "stroke-width": 2.6, "stroke-linecap": "round" }, flag);
+    el("path", { d: `M ${tx} ${NL.y - 34} l 20 6 l -20 6 Z`, fill: "#d6362a", stroke: "#96150c", "stroke-width": 1 }, flag);
+    el("text", {
+      x: tx, y: NL.y - 38, "text-anchor": "middle", "font-size": 12, "font-weight": 800, fill: "#96150c",
+    }, flag).textContent = `目標 ${fmt(target)}`;
   }
 
   function clampNL(v) { return Math.max(-NL_RANGE, Math.min(NL_RANGE, v)); }
@@ -584,6 +588,17 @@
     };
     btn.addEventListener("pointerdown", handler);
   });
+
+  // 供自動化測試檢視狀態用的唯讀掛鉤
+  window.__mathSnake = {
+    get snake() { return snake.map(s => ({ ...s })); },
+    get tokens() { return tokens.map(t => ({ x: t.x, y: t.y, value: t.value })); },
+    get sum() { return sum; },
+    get target() { return target; },
+    get level() { return level; },
+    get running() { return running; },
+    pushDir,
+  };
 
   // ============================================================
   // 啟動
