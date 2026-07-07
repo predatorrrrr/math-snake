@@ -1,7 +1,7 @@
 /* ============================================================
- * 有向數貪食蛇 Math Snake
- * 以貪食蛇玩法練習有向數（正負數）加法：
- * 吃下正負數果實，使「目前總和」剛好等於「目標總和」即可過關。
+ * 有向數貪食蛇 Math Snake — 連續答題模式
+ * 上方出現有向數算式，操控小蛇吃掉正確答案的果實：
+ * 答對加分、答錯扣分且蛇身變長；不定時出現神奇道具。
  * ============================================================ */
 
 (() => {
@@ -13,28 +13,47 @@
   const COLS = 21;
   const ROWS = 15;
   const CELL = 36;                    // 與 index.html 的 viewBox 756x540 對應
-  const TOKEN_COUNT = 6;              // 場上同時存在的果實數
+  const TOKEN_COUNT = 6;              // 場上答案果實數（1 正確 + 5 干擾）
   const NL_RANGE = 15;                // 數軸顯示 -15 ~ +15
 
+  // ---------- 難度 ----------
+  const DIFFS = {
+    easy:   { label: "簡單", tick: 200 },
+    medium: { label: "中等", tick: 170 },
+    hard:   { label: "困難", tick: 148 },
+  };
+
+  // ---------- 道具 ----------
+  const ITEM_TYPES = {
+    ghost:  { icon: "🌀", label: "穿牆術", dur: 10000 },
+    slow:   { icon: "⏰", label: "慢動作", dur: 8000 },
+    shrink: { icon: "🍄", label: "縮小菇", dur: 0 },
+  };
+  const ITEM_LIFETIME = 12000;        // 道具在場上的存活時間
+  const SLOW_FACTOR = 1.6;
+
   // ---------- DOM ----------
-  const board       = document.getElementById("board");
   const groundLayer = document.getElementById("groundLayer");
   const tokenLayer  = document.getElementById("tokenLayer");
+  const itemLayer   = document.getElementById("itemLayer");
   const snakeLayer  = document.getElementById("snakeLayer");
   const fxLayer     = document.getElementById("fxLayer");
   const numberline  = document.getElementById("numberline");
+  const boardFrame  = document.getElementById("boardFrame");
 
-  const hudLevel  = document.getElementById("hudLevel");
-  const hudScore  = document.getElementById("hudScore");
-  const hudTarget = document.getElementById("hudTarget");
-  const hudSum    = document.getElementById("hudSum");
-  const hudNeed   = document.getElementById("hudNeed");
-  const equation  = document.getElementById("equation");
+  const hudDiff    = document.getElementById("hudDiff");
+  const hudScore   = document.getElementById("hudScore");
+  const hudCorrect = document.getElementById("hudCorrect");
+  const hudCombo   = document.getElementById("hudCombo");
+  const hudItem    = document.getElementById("hudItem");
+  const questionEl = document.getElementById("question");
 
-  const overlay      = document.getElementById("overlay");
-  const overlayTitle = document.getElementById("overlayTitle");
-  const overlayBody  = document.getElementById("overlayBody");
-  const overlayBtn   = document.getElementById("overlayBtn");
+  const overlay  = document.getElementById("overlay");
+  const pageMenu = document.getElementById("pageMenu");
+  const pageHow  = document.getElementById("pageHow");
+  const pageOver = document.getElementById("pageOver");
+  const overTitle = document.getElementById("overTitle");
+  const overBody  = document.getElementById("overBody");
 
   // ---------- 遊戲狀態 ----------
   const DIRS = {
@@ -44,22 +63,29 @@
     right: { x: 1,  y: 0 },
   };
 
-  let snake = [];          // [{x,y}]，index 0 為蛇頭
+  let diffKey = "easy";
+  let snake = [];            // [{x,y}]，index 0 為蛇頭
   let dir = DIRS.right;
-  let queuedDirs = [];     // 方向輸入佇列，避免一格內連按造成自撞
-  let tokens = [];         // [{x,y,value,el}]
-  let sum = 0;
-  let target = 0;
-  let level = 1;
+  let queuedDirs = [];
+  let growPending = 0;       // 待增長節數（答錯懲罰 / 答對成長）
+  let tokens = [];           // [{x,y,value,el}]
+  let question = null;       // { html, text, answer }
+  let boardItem = null;      // 場上道具 {x,y,type,el,expireAt}
+  let nextItemAt = 0;
+  let effects = { ghost: 0, slow: 0 };   // 生效中的道具（到期時間戳）
   let score = 0;
-  let terms = [];          // 本關吃到的數，組出算式
-  let tickMs = 190;
+  let correct = 0;
+  let wrong = 0;
+  let combo = 0;
+  let tickMs = 200;
   let timer = null;
   let running = false;
   let paused = false;
 
   // ---------- 工具 ----------
   const randInt = (lo, hi) => Math.floor(Math.random() * (hi - lo + 1)) + lo;
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  const now = () => performance.now();
 
   function el(name, attrs = {}, parent = null) {
     const node = document.createElementNS(SVG_NS, name);
@@ -69,8 +95,10 @@
   }
 
   function fmt(n) { return n > 0 ? `+${n}` : `${n}`; }
-
-  function signClass(n) { return n > 0 ? "pos" : n < 0 ? "neg" : "zero"; }
+  function fmtHtml(n) {
+    const cls = n > 0 ? "pos" : n < 0 ? "neg" : "";
+    return `<span class="${cls}">(${fmt(n)})</span>`;
+  }
 
   // ---------- 音效（Web Audio 簡易合成） ----------
   let audioCtx = null;
@@ -89,14 +117,14 @@
     } catch (_) { /* 靜音環境忽略 */ }
   }
   const sfx = {
-    eatPos:  () => { beep(660, 0.1, "triangle"); beep(880, 0.12, "triangle"); },
-    eatNeg:  () => { beep(330, 0.12, "sawtooth", 0.08); beep(262, 0.14, "sawtooth", 0.08); },
-    win:     () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.16, "triangle"), i * 110)); },
-    crash:   () => { beep(150, 0.3, "sawtooth", 0.2); },
+    right: () => { beep(660, 0.1, "triangle"); setTimeout(() => beep(988, 0.14, "triangle"), 90); },
+    wrongA: () => { beep(220, 0.18, "sawtooth", 0.12); setTimeout(() => beep(165, 0.22, "sawtooth", 0.12), 120); },
+    item:  () => { [784, 988, 1319].forEach((f, i) => setTimeout(() => beep(f, 0.1, "sine", 0.12), i * 70)); },
+    crash: () => { beep(150, 0.3, "sawtooth", 0.2); },
   };
 
   // ============================================================
-  // 草地（棋格明暗交錯，營造修剪過的草坪質感）
+  // 草地
   // ============================================================
   function drawGround() {
     groundLayer.innerHTML = "";
@@ -108,7 +136,6 @@
         }, groundLayer);
       }
     }
-    // 邊緣暗角，增加立體感
     el("rect", {
       x: 0, y: 0, width: COLS * CELL, height: ROWS * CELL,
       fill: "none", stroke: "rgba(20,50,5,0.35)", "stroke-width": 10,
@@ -116,7 +143,79 @@
   }
 
   // ============================================================
-  // 果實：正數 → 蘋果、負數 → 藍莓
+  // 出題（依難度）
+  // ============================================================
+  function nz(lo, hi) { let v = 0; while (v === 0) v = randInt(lo, hi); return v; }
+
+  function makeQuestion() {
+    let terms, ops;   // terms: 數字陣列, ops: 每兩數之間的運算 "+"|"−"|"×"|"÷"
+
+    if (diffKey === "easy") {
+      terms = [nz(-9, 9), nz(-9, 9)];
+      ops = [pick(["+", "−"])];
+    } else if (diffKey === "medium") {
+      terms = [nz(-12, 12), nz(-12, 12), nz(-12, 12)];
+      ops = [pick(["+", "−"]), pick(["+", "−"])];
+    } else {
+      const kind = pick(["mul", "div", "mix"]);
+      if (kind === "mul") {
+        terms = [nz(-9, 9), nz(-9, 9)];
+        ops = ["×"];
+      } else if (kind === "div") {
+        const q = nz(-9, 9), d = nz(-9, 9);
+        terms = [q * d, d];
+        ops = ["÷"];
+      } else {
+        terms = [nz(-6, 6), nz(-6, 6), nz(-12, 12)];
+        ops = ["×", pick(["+", "−"])];
+      }
+    }
+
+    // 依先乘除後加減計算答案
+    const vals = terms.slice();
+    const opList = ops.slice();
+    for (let i = 0; i < opList.length; ) {
+      if (opList[i] === "×" || opList[i] === "÷") {
+        vals.splice(i, 2, opList[i] === "×" ? vals[i] * vals[i + 1] : vals[i] / vals[i + 1]);
+        opList.splice(i, 1);
+      } else i++;
+    }
+    let ans = vals[0];
+    for (let i = 0; i < opList.length; i++) {
+      ans = opList[i] === "+" ? ans + vals[i + 1] : ans - vals[i + 1];
+    }
+
+    const text = terms.map((t, i) => (i === 0 ? `(${fmt(t)})` : ` ${ops[i - 1]} (${fmt(t)})`)).join("");
+    const html = terms.map((t, i) => (i === 0 ? fmtHtml(t) : ` ${ops[i - 1]} ${fmtHtml(t)}`)).join("");
+    return { text, html, answer: ans };
+  }
+
+  function makeDistractors(ans, count) {
+    const set = new Set();
+    const candidates = [];
+    for (const d of [1, 2, 3, 10]) { candidates.push(ans + d, ans - d); }
+    if (ans !== 0) candidates.push(-ans);
+    while (candidates.length < count * 3) candidates.push(ans + randInt(-12, 12));
+    for (const c of candidates) {
+      if (c !== ans && !set.has(c)) set.add(c);
+    }
+    const arr = [...set];
+    // 洗牌後取前 count 個
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr.slice(0, count);
+  }
+
+  function newQuestion() {
+    question = makeQuestion();
+    questionEl.innerHTML = `${question.html} = <b>?</b>`;
+    respawnTokens();
+  }
+
+  // ============================================================
+  // 答案果實：正數 → 蘋果、負數 → 藍莓、零 → 檸檬
   // ============================================================
   function makeTokenEl(token) {
     const cx = token.x * CELL + CELL / 2;
@@ -128,10 +227,8 @@
     const r = CELL * 0.42;
 
     if (token.value > 0) {
-      // 蘋果本體（略呈心形的兩個圓）
       el("circle", { cx: cx - r * 0.28, cy, r: r * 0.82, fill: "url(#appleGrad)" }, inner);
       el("circle", { cx: cx + r * 0.28, cy, r: r * 0.82, fill: "url(#appleGrad)" }, inner);
-      // 果梗與葉子
       el("path", {
         d: `M ${cx} ${cy - r * 0.7} q -2 -7 2 -11`,
         stroke: "#6b4a1d", "stroke-width": 3, fill: "none", "stroke-linecap": "round",
@@ -140,15 +237,12 @@
         d: `M ${cx + 2} ${cy - r * 1.02} q 10 -6 14 2 q -9 6 -14 -2 Z`,
         fill: "#4e9427",
       }, inner);
-      // 高光
       el("ellipse", {
         cx: cx - r * 0.42, cy: cy - r * 0.38, rx: r * 0.26, ry: r * 0.16,
         fill: "rgba(255,255,255,0.65)", transform: `rotate(-28 ${cx - r * 0.42} ${cy - r * 0.38})`,
       }, inner);
-    } else {
-      // 藍莓本體
+    } else if (token.value < 0) {
       el("circle", { cx, cy, r, fill: "url(#berryGrad)" }, inner);
-      // 頂端果萼
       const star = [];
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
@@ -156,71 +250,177 @@
         star.push(`${cx + Math.cos(a) * rr},${cy - r * 0.62 + Math.sin(a) * rr}`);
       }
       el("polygon", { points: star.join(" "), fill: "#22307f", opacity: 0.9 }, inner);
-      // 高光
       el("ellipse", {
         cx: cx - r * 0.36, cy: cy - r * 0.36, rx: r * 0.24, ry: r * 0.15,
         fill: "rgba(255,255,255,0.55)", transform: `rotate(-30 ${cx - r * 0.36} ${cy - r * 0.36})`,
       }, inner);
+    } else {
+      // 檸檬（零）
+      el("ellipse", { cx, cy, rx: r * 1.05, ry: r * 0.8, fill: "url(#lemonGrad)" }, inner);
+      el("ellipse", { cx: cx + r * 1.0, cy, rx: r * 0.14, ry: r * 0.1, fill: "#c9a22a" }, inner);
+      el("ellipse", {
+        cx: cx - r * 0.4, cy: cy - r * 0.3, rx: r * 0.28, ry: r * 0.14,
+        fill: "rgba(255,255,255,0.6)", transform: `rotate(-24 ${cx - r * 0.4} ${cy - r * 0.3})`,
+      }, inner);
     }
 
-    // 數值標籤
+    const label = fmt(token.value).replace("+0", "0");
     el("text", {
       x: cx, y: cy + 5.5,
       "text-anchor": "middle",
-      "font-size": 15,
+      "font-size": label.length <= 2 ? 15 : label.length === 3 ? 12.5 : 11,
       "font-weight": 800,
       "font-family": "inherit",
       fill: "#fff",
       stroke: "rgba(0,0,0,0.35)",
       "stroke-width": 2.6,
       "paint-order": "stroke",
-    }, inner).textContent = fmt(token.value);
+    }, inner).textContent = label;
 
     return g;
   }
 
   function occupied(x, y) {
     return snake.some(s => s.x === x && s.y === y) ||
-           tokens.some(t => t.x === x && t.y === y);
+           tokens.some(t => t.x === x && t.y === y) ||
+           (boardItem && boardItem.x === x && boardItem.y === y);
   }
 
-  function randomTokenValue() {
-    const need = target - sum;
-    // 有一定機率直接生成「剛好補齊差值」的果實，確保關卡可解
-    if (need !== 0 && Math.abs(need) <= 9 && Math.random() < 0.45 &&
-        !tokens.some(t => t.value === need)) {
-      return need;
-    }
-    let v = 0;
-    while (v === 0) v = randInt(-9, 9);
-    return v;
-  }
-
-  function spawnToken() {
+  function freeCell() {
     let x, y, tries = 0;
     do {
       x = randInt(1, COLS - 2);
       y = randInt(1, ROWS - 2);
       tries++;
-    } while (occupied(x, y) && tries < 300);
-    if (tries >= 300) return;
-    const token = { x, y, value: randomTokenValue() };
+    } while (occupied(x, y) && tries < 400);
+    return tries < 400 ? { x, y } : null;
+  }
+
+  function spawnToken(value) {
+    const cell = freeCell();
+    if (!cell) return;
+    const token = { ...cell, value };
     token.el = makeTokenEl(token);
     tokenLayer.appendChild(token.el);
     tokens.push(token);
   }
 
-  function refillTokens() {
-    while (tokens.length < TOKEN_COUNT) spawnToken();
-    // 保底：場上至少一顆能讓學生「朝目標靠近」的果實
-    const need = target - sum;
-    if (need !== 0 && Math.abs(need) <= 9 && !tokens.some(t => t.value === need) && tokens.length > 0) {
-      const t = tokens[0];
-      t.value = need;
-      const fresh = makeTokenEl(t);
-      tokenLayer.replaceChild(fresh, t.el);
-      t.el = fresh;
+  function respawnTokens() {
+    tokens.forEach(t => t.el.remove());
+    tokens = [];
+    const values = [question.answer, ...makeDistractors(question.answer, TOKEN_COUNT - 1)];
+    values.forEach(v => spawnToken(v));
+  }
+
+  // ============================================================
+  // 道具
+  // ============================================================
+  function makeItemEl(item) {
+    const cx = item.x * CELL + CELL / 2;
+    const cy = item.y * CELL + CELL / 2;
+    const g = el("g", { filter: "url(#itemGlow)" });
+    const inner = el("g", { class: "token-bob" }, g);
+    inner.style.transformOrigin = `${cx}px ${cy}px`;
+    const r = CELL * 0.42;
+
+    if (item.type === "ghost") {
+      // 旋渦傳送門
+      el("circle", { cx, cy, r, fill: "url(#portalGrad)" }, inner);
+      el("path", {
+        d: `M ${cx - r * 0.55} ${cy} a ${r * 0.55} ${r * 0.55} 0 1 1 ${r * 0.55} ${r * 0.55}`,
+        stroke: "#e8d9ff", "stroke-width": 2.6, fill: "none", "stroke-linecap": "round",
+      }, inner);
+      el("path", {
+        d: `M ${cx + r * 0.3} ${cy - r * 0.1} a ${r * 0.3} ${r * 0.3} 0 1 1 -${r * 0.3} ${r * 0.3}`,
+        stroke: "#c3a6f5", "stroke-width": 2, fill: "none", "stroke-linecap": "round",
+      }, inner);
+      el("circle", { cx, cy, r: 2.4, fill: "#fff" }, inner);
+    } else if (item.type === "slow") {
+      // 時鐘
+      el("circle", { cx, cy, r, fill: "#8a5527" }, inner);
+      el("circle", { cx, cy, r: r * 0.82, fill: "url(#clockGrad)" }, inner);
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        el("line", {
+          x1: cx + Math.cos(a) * r * 0.68, y1: cy + Math.sin(a) * r * 0.68,
+          x2: cx + Math.cos(a) * r * 0.78, y2: cy + Math.sin(a) * r * 0.78,
+          stroke: "#5c4a24", "stroke-width": i % 3 === 0 ? 2 : 1,
+        }, inner);
+      }
+      el("line", { x1: cx, y1: cy, x2: cx, y2: cy - r * 0.5, stroke: "#3c2f12", "stroke-width": 2.6, "stroke-linecap": "round" }, inner);
+      el("line", { x1: cx, y1: cy, x2: cx + r * 0.38, y2: cy + r * 0.12, stroke: "#3c2f12", "stroke-width": 2, "stroke-linecap": "round" }, inner);
+      el("circle", { cx, cy, r: 2, fill: "#3c2f12" }, inner);
+    } else {
+      // 縮小蘑菇
+      el("path", {
+        d: `M ${cx - r} ${cy + r * 0.1} a ${r} ${r} 0 0 1 ${r * 2} 0 Z`,
+        fill: "url(#mushGrad)",
+      }, inner);
+      el("rect", {
+        x: cx - r * 0.32, y: cy + r * 0.05, width: r * 0.64, height: r * 0.7,
+        rx: r * 0.2, fill: "#f2e8cf", stroke: "#c9b384", "stroke-width": 1,
+      }, inner);
+      el("circle", { cx: cx - r * 0.45, cy: cy - r * 0.25, r: r * 0.16, fill: "#fff" }, inner);
+      el("circle", { cx: cx + r * 0.1,  cy: cy - r * 0.45, r: r * 0.13, fill: "#fff" }, inner);
+      el("circle", { cx: cx + r * 0.5,  cy: cy - r * 0.18, r: r * 0.14, fill: "#fff" }, inner);
     }
+    return g;
+  }
+
+  function scheduleNextItem() {
+    nextItemAt = now() + randInt(9000, 16000);
+  }
+
+  function maybeSpawnItem() {
+    const t = now();
+    if (boardItem) {
+      if (t > boardItem.expireAt) {
+        boardItem.el.remove();
+        boardItem = null;
+        scheduleNextItem();
+      } else if (t > boardItem.expireAt - 3000) {
+        boardItem.el.classList.add("item-fading");
+      }
+      return;
+    }
+    if (t < nextItemAt) return;
+    const cell = freeCell();
+    if (!cell) return;
+    const type = pick(Object.keys(ITEM_TYPES));
+    boardItem = { ...cell, type, expireAt: t + ITEM_LIFETIME };
+    boardItem.el = makeItemEl(boardItem);
+    itemLayer.appendChild(boardItem.el);
+  }
+
+  function applyItem(type) {
+    const info = ITEM_TYPES[type];
+    sfx.item();
+    if (type === "shrink") {
+      const cut = Math.min(3, snake.length - 3);
+      if (cut > 0) snake.splice(snake.length - cut, cut);
+      growPending = 0;
+    } else {
+      effects[type] = now() + info.dur;
+      if (type === "ghost") boardFrame.classList.add("ghost");
+    }
+    popFx(snake[0].x, snake[0].y, `${info.icon} ${info.label}！`, "#fff8c8", "#7a5a10");
+  }
+
+  function updateEffects() {
+    const t = now();
+    if (effects.ghost && t > effects.ghost) {
+      effects.ghost = 0;
+      boardFrame.classList.remove("ghost");
+    }
+    if (effects.slow && t > effects.slow) effects.slow = 0;
+
+    // HUD 道具顯示
+    const active = [];
+    if (effects.ghost) active.push(`🌀${Math.ceil((effects.ghost - t) / 1000)}s`);
+    if (effects.slow)  active.push(`⏰${Math.ceil((effects.slow - t) / 1000)}s`);
+    hudItem.textContent = active.length ? active.join(" ") : "—";
+    hudItem.classList.toggle("item-active", active.length > 0);
+    snakeLayer.setAttribute("opacity", effects.ghost ? 0.7 : 1);
   }
 
   // ============================================================
@@ -231,15 +431,13 @@
     const n = snake.length;
     const body = el("g", { filter: "url(#softShadow)" }, snakeLayer);
 
-    // 由尾到頭繪製，讓頭疊在最上層；半徑往尾端漸縮
     for (let i = n - 1; i >= 1; i--) {
       const seg = snake[i];
-      const t = i / Math.max(n - 1, 1);           // 0=頭側, 1=尾端
+      const t = i / Math.max(n - 1, 1);
       const r = CELL * (0.46 - 0.18 * t);
       const cx = seg.x * CELL + CELL / 2;
       const cy = seg.y * CELL + CELL / 2;
       el("circle", { cx, cy, r, fill: "url(#bodyGrad)" }, body);
-      // 每隔一節加上蟒蛇式菱形斑紋
       if (i % 2 === 0 && r > 8) {
         const d = r * 0.5;
         el("path", {
@@ -261,26 +459,21 @@
     const g = el("g", { transform: `translate(${cx} ${cy}) rotate(${angle})` }, parent);
     const R = CELL * 0.52;
 
-    // 吐信（先畫，讓頭蓋在上面）
     const tongue = el("g", { class: "tongue" }, g);
     el("path", {
       d: `M ${R * 0.9} 0 L ${R * 1.5} 0 M ${R * 1.5} 0 L ${R * 1.85} -4 M ${R * 1.5} 0 L ${R * 1.85} 4`,
       stroke: "#d6274b", "stroke-width": 2.6, fill: "none", "stroke-linecap": "round",
     }, tongue);
 
-    // 頭部（朝行進方向的橢圓）
     el("ellipse", { cx: 0, cy: 0, rx: R * 1.12, ry: R * 0.92, fill: "url(#headGrad)" }, g);
-    // 頭頂高光
     el("ellipse", {
       cx: -R * 0.2, cy: -R * 0.34, rx: R * 0.5, ry: R * 0.22,
       fill: "rgba(255,255,255,0.28)",
     }, g);
 
-    // 鼻孔
     el("circle", { cx: R * 0.78, cy: -R * 0.18, r: 1.7, fill: "#1e3d10" }, g);
     el("circle", { cx: R * 0.78, cy:  R * 0.18, r: 1.7, fill: "#1e3d10" }, g);
 
-    // 眼睛（眼白 + 縱向瞳孔 + 高光）
     for (const side of [-1, 1]) {
       el("ellipse", { cx: R * 0.3, cy: side * R * 0.46, rx: R * 0.3, ry: R * 0.28, fill: "#f7f4e0" }, g);
       el("ellipse", { cx: R * 0.36, cy: side * R * 0.46, rx: R * 0.1, ry: R * 0.2, fill: "#1c2a0d" }, g);
@@ -289,15 +482,16 @@
   }
 
   // ============================================================
-  // 數軸（-15 ~ +15，紅旗 = 目標，蛇頭標記 = 目前總和）
+  // 數軸（顯示上一題正確答案的位置）
   // ============================================================
   const NL = { w: 756, h: 84, pad: 26, y: 50 };
   const nlX = v => NL.pad + ((v + NL_RANGE) / (2 * NL_RANGE)) * (NL.w - NL.pad * 2);
+  const clampNL = v => Math.max(-NL_RANGE, Math.min(NL_RANGE, v));
+  let lastAnswer = 0;
 
   function drawNumberline() {
     numberline.innerHTML = "";
 
-    // 主軸與箭頭
     el("line", {
       x1: NL.pad - 12, y1: NL.y, x2: NL.w - NL.pad + 12, y2: NL.y,
       stroke: "#5c4a24", "stroke-width": 3, "stroke-linecap": "round",
@@ -320,10 +514,10 @@
       }
     }
 
-    // 目標紅旗（遊戲開始前 target 為 0，不顯示）
-    if (target !== 0) drawTargetFlag();
+    el("text", {
+      x: NL.pad, y: 14, "font-size": 11, "font-weight": 700, fill: "#8a713d",
+    }, numberline).textContent = "上一題答案的位置：";
 
-    // 目前總和標記（小蛇頭），用 transform 移動以套用 CSS 過渡動畫
     const marker = el("g", { id: "nlMarker" }, numberline);
     el("ellipse", { cx: 0, cy: 0, rx: 11, ry: 9, fill: "url(#headGrad)", filter: "url(#tinyShadow)" }, marker);
     el("circle", { cx: 3.5, cy: -3, r: 2.6, fill: "#f7f4e0" }, marker);
@@ -334,214 +528,184 @@
     updateNlMarker();
   }
 
-  function drawTargetFlag() {
-    const tx = nlX(clampNL(target));
-    const flag = el("g", {}, numberline);
-    el("line", { x1: tx, y1: NL.y - 6, x2: tx, y2: NL.y - 34, stroke: "#7a4a1d", "stroke-width": 2.6, "stroke-linecap": "round" }, flag);
-    el("path", { d: `M ${tx} ${NL.y - 34} l 20 6 l -20 6 Z`, fill: "#d6362a", stroke: "#96150c", "stroke-width": 1 }, flag);
-    el("text", {
-      x: tx, y: NL.y - 38, "text-anchor": "middle", "font-size": 12, "font-weight": 800, fill: "#96150c",
-    }, flag).textContent = `目標 ${fmt(target)}`;
-  }
-
-  function clampNL(v) { return Math.max(-NL_RANGE, Math.min(NL_RANGE, v)); }
-
   function updateNlMarker() {
     const marker = document.getElementById("nlMarker");
-    if (marker) marker.style.transform = `translate(${nlX(clampNL(sum))}px, ${NL.y - 22}px)`;
+    if (marker) marker.style.transform = `translate(${nlX(clampNL(lastAnswer))}px, ${NL.y - 22}px)`;
   }
 
   // ============================================================
-  // HUD / 算式
+  // HUD / 特效
   // ============================================================
-  function updateHud(bumpSum = false) {
-    hudLevel.textContent = level;
+  function updateHud(bump) {
+    hudDiff.textContent = DIFFS[diffKey].label;
     hudScore.textContent = score;
-    hudTarget.textContent = fmt(target);
-
-    hudSum.textContent = fmt(sum).replace("+0", "0");
-    hudSum.className = `hud-value ${signClass(sum)}`;
-
-    const need = target - sum;
-    hudNeed.textContent = fmt(need).replace("+0", "0");
-    hudNeed.className = `hud-value ${signClass(need)}`;
-
-    if (bumpSum) {
-      hudSum.classList.add("bump");
-      setTimeout(() => hudSum.classList.remove("bump"), 380);
+    hudCorrect.textContent = correct;
+    hudCombo.textContent = combo;
+    if (bump) {
+      const box = bump === "score" ? hudScore : hudCombo;
+      box.classList.add("bump");
+      setTimeout(() => box.classList.remove("bump"), 380);
     }
-    updateNlMarker();
   }
 
-  function updateEquation() {
-    if (terms.length === 0) {
-      equation.innerHTML = `目標 <b>${fmt(target)}</b>：吃下果實，讓總和剛好等於目標！`;
-      return;
-    }
-    const parts = terms.map(v => {
-      const cls = v > 0 ? "pos" : "neg";
-      return `<span class="${cls}">(${fmt(v)})</span>`;
-    });
-    equation.innerHTML = `0 ${parts.map(p => `+ ${p}`).join(" ")} = <b>${fmt(sum).replace("+0", "0")}</b>`;
-  }
-
-  // ============================================================
-  // 吃果實特效
-  // ============================================================
-  function popFx(x, y, value) {
+  function popFx(x, y, text, fill, strokeCol) {
     const cx = x * CELL + CELL / 2;
     const cy = y * CELL + CELL / 2;
     const t = el("text", {
       x: cx, y: cy - 6,
       class: "fx-pop",
       "text-anchor": "middle",
-      "font-size": 22,
-      fill: value > 0 ? "#ffd8cf" : "#cdd8ff",
-      stroke: value > 0 ? "#96150c" : "#1d2a80",
+      "font-size": 20,
+      fill, stroke: strokeCol,
       "stroke-width": 3.2,
       "paint-order": "stroke",
     }, fxLayer);
-    t.textContent = value > 0 ? `加 ${value}` : `減 ${-value}`;
+    t.textContent = text;
     t.style.transformOrigin = `${cx}px ${cy}px`;
     setTimeout(() => t.remove(), 950);
   }
 
   // ============================================================
-  // 關卡流程
+  // 遊戲流程
   // ============================================================
-  function newTarget() {
-    const span = Math.min(6 + level * 2, NL_RANGE - 3);
-    let t = 0;
-    while (t === 0) t = randInt(-span, span);
-    return t;
+  function showPage(page) {
+    [pageMenu, pageHow, pageOver].forEach(p => p.classList.toggle("hidden", p !== page));
+    overlay.classList.toggle("hidden", page === null);
   }
 
-  function startLevel(resetSnake) {
-    sum = 0;
-    terms = [];
-    target = newTarget();
+  function startGame() {
+    score = 0; correct = 0; wrong = 0; combo = 0;
+    growPending = 0;
+    effects = { ghost: 0, slow: 0 };
+    boardFrame.classList.remove("ghost");
+    lastAnswer = 0;
 
-    if (resetSnake) {
-      const cy = Math.floor(ROWS / 2);
-      snake = [{ x: 5, y: cy }, { x: 4, y: cy }, { x: 3, y: cy }];
-      dir = DIRS.right;
-      queuedDirs = [];
-    }
+    const cy = Math.floor(ROWS / 2);
+    snake = [{ x: 5, y: cy }, { x: 4, y: cy }, { x: 3, y: cy }];
+    dir = DIRS.right;
+    queuedDirs = [];
 
-    tokens.forEach(t => t.el.remove());
-    tokens = [];
-    refillTokens();
+    if (boardItem) { boardItem.el.remove(); boardItem = null; }
+    scheduleNextItem();
 
-    tickMs = Math.max(100, 190 - (level - 1) * 12);
+    tickMs = DIFFS[diffKey].tick;
+    newQuestion();
     drawNumberline();
     drawSnake();
     updateHud();
-    updateEquation();
-  }
+    updateEffects();
 
-  function levelClear() {
-    running = false;
-    clearInterval(timer);
-    sfx.win();
-    score += 100 + level * 20;
-
-    const eq = terms.map(v => `(${fmt(v)})`).join(" + ");
-    showOverlay(
-      "🎉 過關成功！",
-      `<p>你完成了算式：</p>
-       <p class="big-num">0 + ${eq} = <b class="${signClass(sum)}">${fmt(sum).replace("+0", "0")}</b></p>
-       <p>剛好等於目標 <b>${fmt(target)}</b>，太棒了！</p>
-       <p class="hint">獲得 ${100 + level * 20} 分</p>`,
-      "下一關",
-      () => { level++; startLevel(false); startLoop(); }
-    );
-    updateHud();
+    showPage(null);
+    running = true;
+    paused = false;
+    clearTimeout(timer);
+    loop();
   }
 
   function gameOver(reason) {
     running = false;
-    clearInterval(timer);
+    clearTimeout(timer);
     sfx.crash();
-    showOverlay(
-      "💥 遊戲結束",
-      `<p>${reason}</p>
-       <p>最終分數：<b class="big-num">${score}</b>（到達第 ${level} 關）</p>
-       <p class="hint">小提醒：吃到負數會「往回減」，規劃路線時想想數軸的方向喔！</p>`,
-      "再玩一次",
-      () => { level = 1; score = 0; startLevel(true); startLoop(); }
-    );
-  }
+    boardFrame.classList.remove("ghost");
 
-  function showOverlay(title, bodyHtml, btnText, onClick) {
-    overlayTitle.textContent = title;
-    overlayBody.innerHTML = bodyHtml;
-    overlayBtn.textContent = btnText;
-    overlayBtn.onclick = () => {
-      overlay.classList.add("hidden");
-      onClick();
-    };
-    overlay.classList.remove("hidden");
+    const total = correct + wrong;
+    const acc = total > 0 ? Math.round((correct / total) * 100) : 0;
+    overTitle.textContent = "💥 遊戲結束";
+    overBody.innerHTML = `
+      <p>${reason}</p>
+      <p>最終分數：<b class="big-num">${score}</b></p>
+      <p>答對 <b class="pos">${correct}</b> 題 ・ 答錯 <b class="neg">${wrong}</b> 題 ・ 正確率 <b>${acc}%</b></p>
+      <p class="hint">小提醒：先算好答案再出發，規劃最短又安全的路線！</p>`;
+    showPage(pageOver);
   }
 
   // ============================================================
-  // 主迴圈
+  // 主迴圈（setTimeout 鏈，方便慢動作道具動態調速）
   // ============================================================
+  function loop() {
+    if (!running) return;
+    tick();
+    const interval = tickMs * (effects.slow ? SLOW_FACTOR : 1);
+    timer = setTimeout(loop, interval);
+  }
+
   function tick() {
     if (paused) return;
+
+    updateEffects();
+    maybeSpawnItem();
 
     if (queuedDirs.length) dir = queuedDirs.shift();
 
     const head = snake[0];
-    const nx = head.x + dir.x;
-    const ny = head.y + dir.y;
+    let nx = head.x + dir.x;
+    let ny = head.y + dir.y;
 
-    // 撞牆
+    // 撞牆／穿牆
     if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) {
-      gameOver("小蛇撞到圍欄了！");
-      return;
+      if (effects.ghost) {
+        nx = (nx + COLS) % COLS;
+        ny = (ny + ROWS) % ROWS;
+      } else {
+        gameOver("小蛇撞到圍欄了！");
+        return;
+      }
     }
-    // 撞到自己（尾巴這回合會前進，故排除最後一節）
-    if (snake.some((s, i) => i < snake.length - 1 && s.x === nx && s.y === ny)) {
+
+    // 撞到自己（尾巴這回合若會前進則排除最後一節）
+    const tailMoves = growPending === 0;
+    if (snake.some((s, i) => (!tailMoves || i < snake.length - 1) && s.x === nx && s.y === ny)) {
       gameOver("小蛇咬到自己的身體了！");
       return;
     }
 
     snake.unshift({ x: nx, y: ny });
+    if (growPending > 0) growPending--;
+    else snake.pop();
 
+    // 吃到道具
+    if (boardItem && boardItem.x === nx && boardItem.y === ny) {
+      const type = boardItem.type;
+      boardItem.el.remove();
+      boardItem = null;
+      scheduleNextItem();
+      applyItem(type);
+    }
+
+    // 吃到答案果實
     const hit = tokens.findIndex(t => t.x === nx && t.y === ny);
     if (hit >= 0) {
       const token = tokens[hit];
       token.el.remove();
       tokens.splice(hit, 1);
 
-      sum += token.value;
-      terms.push(token.value);
-      score += 10;
-      (token.value > 0 ? sfx.eatPos : sfx.eatNeg)();
-      popFx(nx, ny, token.value);
-
-      // 吃到果實蛇身變長（不移除尾巴）
-      refillTokens();
-      updateHud(true);
-      updateEquation();
-
-      if (sum === target) {
-        drawSnake();
-        levelClear();
-        return;
+      if (token.value === question.answer) {
+        combo++;
+        correct++;
+        const pts = 20 + (combo - 1) * 5;
+        score += pts;
+        growPending += 1;
+        lastAnswer = token.value;
+        sfx.right();
+        popFx(nx, ny, `答對！+${pts}`, "#d8ffc2", "#2e611a");
+        updateNlMarker();
+        // 每答對 5 題加速一點
+        if (correct % 5 === 0) tickMs = Math.max(95, tickMs - 10);
+        newQuestion();
+        updateHud("combo");
+      } else {
+        wrong++;
+        combo = 0;
+        score = Math.max(0, score - 10);
+        growPending += 2;          // 答錯懲罰：蛇身變長兩節
+        sfx.wrongA();
+        popFx(nx, ny, "答錯 −10", "#ffd0c8", "#96150c");
+        spawnToken(pick(makeDistractors(question.answer, 3)));   // 補一顆干擾果實
+        updateHud("score");
       }
-    } else {
-      snake.pop();
     }
 
     drawSnake();
-  }
-
-  function startLoop() {
-    running = true;
-    paused = false;
-    clearInterval(timer);
-    timer = setInterval(tick, tickMs);
   }
 
   // ============================================================
@@ -551,7 +715,6 @@
     const nd = DIRS[name];
     if (!nd) return;
     const last = queuedDirs.length ? queuedDirs[queuedDirs.length - 1] : dir;
-    // 不允許 180 度回頭
     if (nd.x === -last.x && nd.y === -last.y) return;
     if (nd.x === last.x && nd.y === last.y) return;
     if (queuedDirs.length < 2) queuedDirs.push(nd);
@@ -568,9 +731,9 @@
       e.preventDefault();
       if (running) {
         paused = !paused;
-        equation.innerHTML = paused
+        questionEl.innerHTML = paused
           ? "⏸ 已暫停 — 按空白鍵繼續"
-          : (updateEquation(), equation.innerHTML);
+          : `${question.html} = <b>?</b>`;
       }
       return;
     }
@@ -582,22 +745,45 @@
   });
 
   document.querySelectorAll(".dpad-btn").forEach(btn => {
-    const handler = e => {
+    btn.addEventListener("pointerdown", e => {
       e.preventDefault();
       if (running && !paused) pushDir(btn.dataset.dir);
-    };
-    btn.addEventListener("pointerdown", handler);
+    });
   });
+
+  // ============================================================
+  // 選單
+  // ============================================================
+  document.querySelectorAll(".diff-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      diffKey = btn.dataset.diff;
+      document.querySelectorAll(".diff-btn").forEach(b => b.classList.toggle("selected", b === btn));
+    });
+  });
+
+  document.getElementById("btnStart").onclick = startGame;
+  document.getElementById("btnHow").onclick   = () => showPage(pageHow);
+  document.getElementById("btnBack").onclick  = () => showPage(pageMenu);
+  document.getElementById("btnRetry").onclick = startGame;
+  document.getElementById("btnMenu").onclick  = () => {
+    questionEl.textContent = "請在主選單選擇難度開始遊戲";
+    showPage(pageMenu);
+  };
 
   // 供自動化測試檢視狀態用的唯讀掛鉤
   window.__mathSnake = {
     get snake() { return snake.map(s => ({ ...s })); },
+    get dir() { return { ...dir }; },
     get tokens() { return tokens.map(t => ({ x: t.x, y: t.y, value: t.value })); },
-    get sum() { return sum; },
-    get target() { return target; },
-    get level() { return level; },
+    get question() { return question ? { text: question.text, answer: question.answer } : null; },
+    get boardItem() { return boardItem ? { x: boardItem.x, y: boardItem.y, type: boardItem.type } : null; },
+    get effects() { return { ...effects }; },
+    get score() { return score; },
+    get correct() { return correct; },
+    get wrong() { return wrong; },
     get running() { return running; },
     pushDir,
+    debugSpawnItem(type) { nextItemAt = 0; if (boardItem) { boardItem.el.remove(); boardItem = null; } const c = freeCell(); if (c) { boardItem = { ...c, type, expireAt: now() + ITEM_LIFETIME }; boardItem.el = makeItemEl(boardItem); itemLayer.appendChild(boardItem.el); } },
   };
 
   // ============================================================
@@ -605,10 +791,5 @@
   // ============================================================
   drawGround();
   drawNumberline();
-
-  overlayBtn.onclick = () => {
-    overlay.classList.add("hidden");
-    startLevel(true);
-    startLoop();
-  };
+  showPage(pageMenu);
 })();

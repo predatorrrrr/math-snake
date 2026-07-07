@@ -12,33 +12,33 @@
 <div class="stage">
 
   <header class="hud">
-    <div class="hud-box hud-level">
-      <span class="hud-label">關卡</span>
-      <span class="hud-value" id="hudLevel">1</span>
+    <div class="hud-box hud-diff">
+      <span class="hud-label">難度</span>
+      <span class="hud-value" id="hudDiff">—</span>
     </div>
     <div class="hud-box hud-score">
       <span class="hud-label">分數</span>
       <span class="hud-value" id="hudScore">0</span>
     </div>
-    <div class="hud-box hud-target">
-      <span class="hud-label">目標總和</span>
-      <span class="hud-value" id="hudTarget">—</span>
+    <div class="hud-box hud-correct">
+      <span class="hud-label">答對</span>
+      <span class="hud-value" id="hudCorrect">0</span>
     </div>
-    <div class="hud-box hud-sum">
-      <span class="hud-label">目前總和</span>
-      <span class="hud-value" id="hudSum">0</span>
+    <div class="hud-box hud-combo">
+      <span class="hud-label">連擊</span>
+      <span class="hud-value" id="hudCombo">0</span>
     </div>
-    <div class="hud-box hud-need">
-      <span class="hud-label">還差</span>
-      <span class="hud-value" id="hudNeed">—</span>
+    <div class="hud-box hud-item">
+      <span class="hud-label">道具</span>
+      <span class="hud-value" id="hudItem">—</span>
     </div>
   </header>
 
   <div class="equation-bar">
-    <span id="equation">吃下正負數果實，讓總和剛好等於目標！</span>
+    <span id="question">請在主選單選擇難度開始遊戲</span>
   </div>
 
-  <div class="board-frame">
+  <div class="board-frame" id="boardFrame">
     <svg id="board" viewBox="0 0 756 540" preserveAspectRatio="xMidYMid meet" aria-label="遊戲棋盤">
       <defs>
         <!-- 草地紋理 -->
@@ -80,6 +80,31 @@
           <stop offset="45%" stop-color="#4a5fd6"/>
           <stop offset="100%" stop-color="#1d2a80"/>
         </radialGradient>
+        <!-- 檸檬（零） -->
+        <radialGradient id="lemonGrad" cx="32%" cy="28%" r="80%">
+          <stop offset="0%"  stop-color="#fff3b0"/>
+          <stop offset="45%" stop-color="#f2c832"/>
+          <stop offset="100%" stop-color="#b8860b"/>
+        </radialGradient>
+
+        <!-- 道具：穿牆傳送門 -->
+        <radialGradient id="portalGrad" cx="50%" cy="50%" r="50%">
+          <stop offset="0%"  stop-color="#e8d9ff"/>
+          <stop offset="45%" stop-color="#9d5ce8"/>
+          <stop offset="100%" stop-color="#4a1d8a"/>
+        </radialGradient>
+        <!-- 道具：時鐘面 -->
+        <radialGradient id="clockGrad" cx="40%" cy="35%" r="75%">
+          <stop offset="0%"  stop-color="#ffffff"/>
+          <stop offset="70%" stop-color="#f0e8d0"/>
+          <stop offset="100%" stop-color="#c9b384"/>
+        </radialGradient>
+        <!-- 道具：蘑菇帽 -->
+        <radialGradient id="mushGrad" cx="35%" cy="30%" r="80%">
+          <stop offset="0%"  stop-color="#ff8f7a"/>
+          <stop offset="50%" stop-color="#e03c2a"/>
+          <stop offset="100%" stop-color="#8f150a"/>
+        </radialGradient>
 
         <filter id="softShadow" x="-40%" y="-40%" width="180%" height="180%">
           <feDropShadow dx="0" dy="3" stdDeviation="2.4" flood-color="#1c3a0d" flood-opacity="0.45"/>
@@ -87,30 +112,79 @@
         <filter id="tinyShadow" x="-40%" y="-40%" width="180%" height="180%">
           <feDropShadow dx="0" dy="2" stdDeviation="1.4" flood-color="#20330f" flood-opacity="0.4"/>
         </filter>
+        <filter id="itemGlow" x="-60%" y="-60%" width="220%" height="220%">
+          <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#ffffff" flood-opacity="0.8"/>
+        </filter>
       </defs>
 
       <g id="groundLayer"></g>
       <g id="tokenLayer"></g>
+      <g id="itemLayer"></g>
       <g id="snakeLayer"></g>
       <g id="fxLayer"></g>
     </svg>
 
-    <!-- 覆蓋層：開始 / 過關 / 結束 -->
+    <!-- 覆蓋層：主選單 / 遊戲說明 / 遊戲結束 -->
     <div class="overlay" id="overlay">
-      <div class="overlay-card" id="overlayCard">
-        <h1 id="overlayTitle">有向數貪食蛇</h1>
-        <div id="overlayBody">
-          <p>操控小蛇吃下 <b class="pos">正數蘋果</b> 與 <b class="neg">負數藍莓</b>，</p>
-          <p>讓「目前總和」剛好等於「目標總和」就能過關！</p>
-          <p class="hint">⌨️ 方向鍵 / WASD 移動 ・ 空白鍵暫停</p>
-          <p class="hint">🍎 吃 +3 表示 加 3　🫐 吃 −5 表示 減 5</p>
+
+      <!-- 主選單 -->
+      <div class="overlay-card" id="pageMenu">
+        <h1>🐍 有向數貪食蛇</h1>
+        <p class="menu-sub">看題目、算答案，吃掉正確的果實！</p>
+
+        <div class="diff-group" role="group" aria-label="選擇難度">
+          <button class="diff-btn selected" data-diff="easy">
+            簡單
+            <small>兩數加減（±9）</small>
+          </button>
+          <button class="diff-btn" data-diff="medium">
+            中等
+            <small>三數加減（±12）</small>
+          </button>
+          <button class="diff-btn" data-diff="hard">
+            困難
+            <small>乘法・除法・混合</small>
+          </button>
         </div>
-        <button class="btn-primary" id="overlayBtn">開始遊戲</button>
+
+        <div class="menu-actions">
+          <button class="btn-primary" id="btnStart">開始遊戲</button>
+          <button class="btn-secondary" id="btnHow">遊戲說明</button>
+        </div>
       </div>
+
+      <!-- 遊戲說明 -->
+      <div class="overlay-card hidden" id="pageHow">
+        <h1>📖 遊戲說明</h1>
+        <div class="how-body">
+          <p><b>玩法</b>：畫面上方會出現一條有向數算式，計算出答案後，操控小蛇吃掉標示<b>正確答案</b>的果實。答對會馬上出下一題，遊戲不停歇！</p>
+          <p>🍎 紅蘋果＝正數　🫐 藍莓＝負數　🍋 檸檬＝零</p>
+          <p><b>計分</b>：答對 <b class="pos">+20 分</b>（連擊有加分）；吃錯 <b class="neg">−10 分</b>，而且小蛇會<b>變長兩節</b>，越來越難走！</p>
+          <p><b>神奇道具</b>（不定時出現，吃到立即生效）：</p>
+          <p class="how-items">
+            🌀 <b>穿牆術</b>：10 秒內可以穿過圍欄，從另一邊出來<br>
+            ⏰ <b>慢動作</b>：8 秒內小蛇減速，方便思考<br>
+            🍄 <b>縮小菇</b>：立即縮短三節蛇身
+          </p>
+          <p><b>操作</b>：方向鍵 / WASD 移動，空白鍵暫停。撞到圍欄（沒有穿牆術時）或咬到自己就結束。</p>
+        </div>
+        <button class="btn-primary" id="btnBack">返回主選單</button>
+      </div>
+
+      <!-- 遊戲結束 -->
+      <div class="overlay-card hidden" id="pageOver">
+        <h1 id="overTitle">💥 遊戲結束</h1>
+        <div id="overBody"></div>
+        <div class="menu-actions">
+          <button class="btn-primary" id="btnRetry">再玩一次</button>
+          <button class="btn-secondary" id="btnMenu">主選單</button>
+        </div>
+      </div>
+
     </div>
   </div>
 
-  <!-- 數軸 -->
+  <!-- 數軸：顯示上一題正確答案的位置 -->
   <div class="numberline-frame">
     <svg id="numberline" viewBox="0 0 756 84" preserveAspectRatio="xMidYMid meet" aria-label="數軸"></svg>
   </div>
@@ -123,7 +197,7 @@
     <button class="dpad-btn dpad-right" data-dir="right" aria-label="右">▶</button>
   </div>
 
-  <footer class="foot-note">數學小教室：吃到 −5 就等於「加上 (−5)」，總和會往數軸左邊移動 5 格。</footer>
+  <footer class="foot-note">數學小教室：負數在數軸 0 的左邊；兩個負數相乘，答案會變成正數喔！</footer>
 </div>
 
 <script src="js/game.js"></script>
